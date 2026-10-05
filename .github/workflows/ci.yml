@@ -72,6 +72,24 @@ jobs:
           claim-tracer --help | grep -qi "RANGE check" \
             || { echo "::error::--help must state that this is a range check, not a correctness check"; exit 1; }
 
+      # 「零发现」被当成「通过」是这工具最早、也最危险的 bug：
+      # 数字都在 \input 进来的表格里而它没读到，于是它报了一个绿色结果。
+      # 把退出码钉在 CI 里，防止回退。
+      - name: Zero findings must exit 3, not 0
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/nc && cd /tmp/nc
+          printf '\\documentclass{article}\\begin{document}No numbers here.\\end{document}\n' > p.tex
+          mkdir -p ev && printf 'epoch,acc\n0,0.91\n' > ev/m.csv
+          claim-tracer --paper p.tex --evidence ev > /dev/null 2>&1
+          rc=$?
+          if [ "$rc" -ne 3 ]; then
+            echo "::error::a paper with no checkable numbers must exit 3 (got $rc) -- 'found nothing' must never be reported as a pass"
+            exit 1
+          fi
+          echo "ok: zero findings -> exit 3, not 0"
+
   packaging:
     name: packaging (sdist + wheel)
     runs-on: ubuntu-latest
