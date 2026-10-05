@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claim-tracer"
+version = "0.1.0"
+description = "Trace every number in a paper back to an artifact on disk. A range check, not a correctness check — and it says so."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Zoloa-hub" }]
+keywords = [
+  "reproducibility",
+  "research-integrity",
+  "audit",
+  "llm",
+  "paper",
+  "traceability",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+#: **No mandatory third-party dependencies.** The whole point is that you can run
+#: it against a paper and a results directory on any machine, offline, without
+#: installing a stack first. Anything that needs numpy/pandas would defeat that.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Zoloa-hub/claim-tracer"
+Issues = "https://github.com/Zoloa-hub/claim-tracer/issues"
+
+[project.scripts]
+claim-tracer = "claim_tracer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+claim_tracer = ["py.typed"]
