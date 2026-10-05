@@ -27,12 +27,19 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Install the package
+        run: python -m pip install -e .
+
       # 契约：**零第三方依赖**。
       #
-      # 早期写法是 `pip list` 扫整台机器有没有 numpy/pytest —— 那验证的是
+      # 这**必须放在安装之后**。第一次写的时候它排在 `pip install` 前面，
+      # 于是 `importlib.metadata.requires("claim-tracer")` 抛
+      # `PackageNotFoundError` —— 7 个 job（每个 OS × 每个 Python）全挂在同一步。
+      # 一个检查放在它依赖的前提之前，就会稳定地、在每个平台上都失败。
+      #
+      # 另外：早期版本用 `pip list` 扫整台机器有没有 numpy/pytest —— 那验证的是
       # **环境恰好干净**（环境事实），不是**我们的包不依赖任何东西**（契约本身）。
-      # 它当时碰巧通过了，但换个 runner 镜像就可能红，而红的原因与我们的承诺无关。
-      # 这类「把环境事实当断言」的检查已反复出现，所以改为问打包元数据。
+      # 环境事实会随 runner 镜像变化，契约不会。
       - name: Package declares zero dependencies
         shell: bash
         run: |
@@ -40,27 +47,37 @@ jobs:
           import importlib.metadata as md
           import pathlib
           import sys
-          import tomllib
 
-          requires = md.requires("claim-tracer") or []
+          try:
+              requires = md.requires("claim-tracer") or []
+          except md.PackageNotFoundError:
+              print("::error::claim-tracer metadata not found -- this check must run "
+                    "AFTER the install step, otherwise it tests nothing and fails "
+                    "on every platform")
+              sys.exit(1)
+
           if requires:
               print(f"::error::claim-tracer declares dependencies: {requires}")
               sys.exit(1)
+          print("contract holds: installed metadata declares no dependencies")
 
-          # 与 pyproject 交叉核对，防止元数据与实际声明不一致
+          # 与 pyproject 交叉核对，防止元数据与实际声明不一致。
+          # tomllib 是 3.11+ 才有；3.10 上跳过这一项并**说明为什么**，
+          # 而不是静默少做一件事。
+          try:
+              import tomllib
+          except ModuleNotFoundError:
+              print("note: tomllib unavailable (Python < 3.11); "
+                    "pyproject cross-check skipped, metadata check still ran")
+              sys.exit(0)
+
           data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
           declared = data["project"].get("dependencies") or []
           if declared:
               print(f"::error::pyproject declares dependencies: {declared}")
               sys.exit(1)
-
-          optional = data["project"].get("optional-dependencies") or {}
-          print("contract holds: claim-tracer declares no dependencies")
-          print(f"optional groups: {sorted(optional) or 'none'}")
+          print("contract holds: pyproject declares no dependencies")
           PY
-
-      - name: Install the package
-        run: python -m pip install -e .
 
       - name: Run the test suite
         run: python tests/test_claim_tracer.py
@@ -69,6 +86,8 @@ jobs:
         shell: bash
         run: |
           claim-tracer --help
+          # 边界必须写在第一屏：这个工具是范围检查，不是正确性检查。
+          # 如果这句话被删掉，它就会变成一个听起来比实际更可靠的工具。
           claim-tracer --help | grep -qi "RANGE check" \
             || { echo "::error::--help must state that this is a range check, not a correctness check"; exit 1; }
 
@@ -79,9 +98,16 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p /tmp/nc && cd /tmp/nc
-          printf '\\documentclass{article}\\begin{document}No numbers here.\\end{document}\n' > p.tex
-          mkdir -p ev && printf 'epoch,acc\n0,0.91\n' > ev/m.csv
+          work="${RUNNER_TEMP:-/tmp}/nothing-checked"
+          rm -rf "$work" && mkdir -p "$work/ev"
+          cd "$work"
+          cat > p.tex <<'TEX'
+          \documentclass{article}
+          \begin{document}
+          No numbers here.
+          \end{document}
+          TEX
+          printf 'epoch,acc\n0,0.91\n' > ev/m.csv
           claim-tracer --paper p.tex --evidence ev > /dev/null 2>&1
           rc=$?
           if [ "$rc" -ne 3 ]; then
@@ -106,4 +132,10 @@ jobs:
           python -m venv /tmp/v
           /tmp/v/bin/python -m pip install --quiet dist/*.whl
           /tmp/v/bin/claim-tracer --help > /dev/null
-          echo "wheel installs and the console script runs"
+          # 装进干净 venv 后仍应零依赖 —— 若有人偷偷加了，这里会一起装进来
+          /tmp/v/bin/python -c "
+          import importlib.metadata as md
+          r = md.requires('claim-tracer') or []
+          assert not r, f'wheel declares dependencies: {r}'
+          print('wheel installs clean; no dependencies pulled in')
+          "
