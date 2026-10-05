@@ -27,21 +27,36 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # 契约：**零第三方依赖**。所以这里刻意什么都不装 ——
-      # 一旦有人加了依赖，这个 job 会立刻失败，而不是等到用户装不上时才发现。
-      - name: No dependencies installed
+      # 契约：**零第三方依赖**。
+      #
+      # 早期写法是 `pip list` 扫整台机器有没有 numpy/pytest —— 那验证的是
+      # **环境恰好干净**（环境事实），不是**我们的包不依赖任何东西**（契约本身）。
+      # 它当时碰巧通过了，但换个 runner 镜像就可能红，而红的原因与我们的承诺无关。
+      # 这类「把环境事实当断言」的检查已反复出现，所以改为问打包元数据。
+      - name: Package declares zero dependencies
         shell: bash
         run: |
           python - <<'PY'
-          import subprocess, sys
-          out = subprocess.run([sys.executable, "-m", "pip", "list", "--format=freeze"],
-                               capture_output=True, text=True).stdout.lower()
-          for forbidden in ("numpy", "pandas", "scipy", "requests", "pytest"):
-              if forbidden in out:
-                  print(f"::error::{forbidden} is present in the base environment; "
-                        f"the zero-dependency claim cannot be verified here")
-                  sys.exit(1)
-          print("base environment is dependency-free")
+          import importlib.metadata as md
+          import pathlib
+          import sys
+          import tomllib
+
+          requires = md.requires("claim-tracer") or []
+          if requires:
+              print(f"::error::claim-tracer declares dependencies: {requires}")
+              sys.exit(1)
+
+          # 与 pyproject 交叉核对，防止元数据与实际声明不一致
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          declared = data["project"].get("dependencies") or []
+          if declared:
+              print(f"::error::pyproject declares dependencies: {declared}")
+              sys.exit(1)
+
+          optional = data["project"].get("optional-dependencies") or {}
+          print("contract holds: claim-tracer declares no dependencies")
+          print(f"optional groups: {sorted(optional) or 'none'}")
           PY
 
       - name: Install the package
